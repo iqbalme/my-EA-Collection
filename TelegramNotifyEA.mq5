@@ -48,7 +48,7 @@ struct OrderData
 input string botToken = "";          // Telegram Bot Token
 input string chatIds = "";           // Telegram Chat IDs, separated by comma
 input bool sendChartScreenshot = true; // Send chart screenshot when opening position
-input bool debugSendTest = false;    // If true, send a small test document on init for debugging
+//input bool debugSendTest = false;    // If true, send a small test document on init for debugging
 
 // Global variables
 PositionData prevPositions[];
@@ -82,10 +82,10 @@ int OnInit()
     UpdatePrevPositions();
     UpdatePrevOrders();
     // Optional debug: send small test document to verify multipart upload
-    if (debugSendTest)
-    {
-        SendTestDocument();
-    }
+    //if (debugSendTest)
+    //{
+        //SendTestDocument();
+    //}
 
     Print("Telegram Notify EA initialized.");
     return INIT_SUCCEEDED;
