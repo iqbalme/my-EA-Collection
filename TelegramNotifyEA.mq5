@@ -250,10 +250,10 @@ void CheckOrderChanges()
             int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
             string type = "";
             ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
-            if (orderType == ORDER_TYPE_BUY_LIMIT) type = "🟢⬆️ BUY LIMIT";
-            else if (orderType == ORDER_TYPE_SELL_LIMIT) type = "🔴⬇️ SELL LIMIT";
-            else if (orderType == ORDER_TYPE_BUY_STOP) type = "🟢⬆️ BUY STOP";
-            else if (orderType == ORDER_TYPE_SELL_STOP) type = "🔴⬇️ SELL STOP";
+            if (orderType == ORDER_TYPE_BUY_LIMIT) type = "📈 BUY LIMIT";
+            else if (orderType == ORDER_TYPE_SELL_LIMIT) type = "📉 SELL LIMIT";
+            else if (orderType == ORDER_TYPE_BUY_STOP) type = "📈 BUY STOP";
+            else if (orderType == ORDER_TYPE_SELL_STOP) type = "📉 SELL STOP";
             else type = "UNKNOWN";
 
             string message = "Order Placed:\n" + type + "\nTicket: <b>" + IntegerToString(ticket) + "</b>\nSymbol: <b>" + symbol + "</b>\nVolume: <b>" + DoubleToString(OrderGetDouble(ORDER_VOLUME_CURRENT), 2) + "</b>\nPrice: <b>" + DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN), digits) + "</b>\nSL: <b>" + DoubleToString(OrderGetDouble(ORDER_SL), digits) + "</b>\nTP: <b>" + DoubleToString(OrderGetDouble(ORDER_TP), digits) + "</b>";
@@ -441,10 +441,10 @@ void SendTelegramPhoto(long ticket, string caption)
         }
 
         // Delete file after sending
-        if (FileDelete(filepath))
-            Print("Screenshot file deleted: " + filepath);
-        else
-            Print("Failed to delete screenshot file: " + filepath + ", error: " + IntegerToString(GetLastError()));
+        //if (FileDelete(filepath))
+        //    Print("Screenshot file deleted: " + filepath);
+        //else
+        //    Print("Failed to delete screenshot file: " + filepath + ", error: " + IntegerToString(GetLastError()));
     }
 }
 //+------------------------------------------------------------------+
