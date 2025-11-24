@@ -180,10 +180,16 @@ void CheckPositionChanges()
             {
                 string symbol = posInfo.Symbol();
                 int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-                string type = (posInfo.PositionType() == POSITION_TYPE_BUY) ? "🟢⬆️ BUY" : "🔴⬇️ SELL";
+                string type = (posInfo.PositionType() == POSITION_TYPE_BUY) ? "📈 BUY" : "📉 SELL";
                 string message = "Position Opened:\n" + type + "\nTicket: <b>" + IntegerToString(posInfo.Ticket()) + "</b>\nSymbol: <b>" + symbol + "</b>\nVolume: <b>" + DoubleToString(posInfo.Volume(), 2) + "</b>\nPrice: <b>" + DoubleToString(posInfo.PriceOpen(), digits) + "</b>\nSL: <b>" + DoubleToString(posInfo.StopLoss(), digits) + "</b>\nTP: <b>" + DoubleToString(posInfo.TakeProfit(), digits) + "</b>";
-                SendTelegramMessage(message);
-                SendTelegramPhoto(posInfo.Ticket());
+                if (sendChartScreenshot)
+                {
+                    SendTelegramPhoto(posInfo.Ticket(), message);
+                }
+                else
+                {
+                    SendTelegramMessage(message);
+                }
             }
         }
     }
@@ -332,7 +338,7 @@ void SendTelegramMessage(string text)
 //+------------------------------------------------------------------+
 //| Send photo to Telegram                                           |
 //+------------------------------------------------------------------+
-void SendTelegramPhoto(long ticket)
+void SendTelegramPhoto(long ticket, string caption)
 {
     if (!sendChartScreenshot) return;
 
@@ -372,37 +378,44 @@ void SendTelegramPhoto(long ticket)
         for (int b = 0; b < filesize; b++)
             filedata[b] = (char)fileU[b];
 
-        // Build multipart body as char array with 'document' field
+        // Build multipart body as char array with 'document' field plus caption and parse_mode
         string header1 = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + IntegerToString(chatIdsArray[i]) + "\r\n";
+        // Trim caption to Telegram limit (1024 chars)
+        string cap = caption;
+        if (StringLen(cap) > 1024) cap = StringSubstr(cap, 0, 1024);
+        string headerCaption = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n" + cap + "\r\n";
+        string headerParse = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"parse_mode\"\r\n\r\nHTML\r\n";
         string header2 = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\nContent-Type: image/png\r\n\r\n";
         string footer = "\r\n--" + boundary + "--\r\n";
 
         char header1Array[];
+        char headerCaptionArray[];
+        char headerParseArray[];
         char header2Array[];
         char footerArray[];
         StringToCharArray(header1, header1Array, 0, WHOLE_ARRAY, CP_UTF8);
+        StringToCharArray(headerCaption, headerCaptionArray, 0, WHOLE_ARRAY, CP_UTF8);
+        StringToCharArray(headerParse, headerParseArray, 0, WHOLE_ARRAY, CP_UTF8);
         StringToCharArray(header2, header2Array, 0, WHOLE_ARRAY, CP_UTF8);
         StringToCharArray(footer, footerArray, 0, WHOLE_ARRAY, CP_UTF8);
 
-        int h1len = ArraySize(header1Array);
-        if (h1len>0 && header1Array[h1len-1]==0) h1len--;
-        int h2len = ArraySize(header2Array);
-        if (h2len>0 && header2Array[h2len-1]==0) h2len--;
+        int h1len = ArraySize(header1Array); if (h1len>0 && header1Array[h1len-1]==0) h1len--;
+        int hcaplen = ArraySize(headerCaptionArray); if (hcaplen>0 && headerCaptionArray[hcaplen-1]==0) hcaplen--;
+        int hparlen = ArraySize(headerParseArray); if (hparlen>0 && headerParseArray[hparlen-1]==0) hparlen--;
+        int h2len = ArraySize(header2Array); if (h2len>0 && header2Array[h2len-1]==0) h2len--;
         int flen = ArraySize(filedata);
-        int fend = ArraySize(footerArray);
-        if (fend>0 && footerArray[fend-1]==0) fend--;
+        int fend = ArraySize(footerArray); if (fend>0 && footerArray[fend-1]==0) fend--;
 
-        int totalSize = h1len + h2len + flen + fend;
+        int totalSize = h1len + hcaplen + hparlen + h2len + flen + fend;
         char postData[];
         ArrayResize(postData, totalSize);
 
         int offset = 0;
-        ArrayCopy(postData, header1Array, offset, 0, h1len);
-        offset += h1len;
-        ArrayCopy(postData, header2Array, offset, 0, h2len);
-        offset += h2len;
-        ArrayCopy(postData, filedata, offset, 0, flen);
-        offset += flen;
+        ArrayCopy(postData, header1Array, offset, 0, h1len); offset += h1len;
+        ArrayCopy(postData, headerCaptionArray, offset, 0, hcaplen); offset += hcaplen;
+        ArrayCopy(postData, headerParseArray, offset, 0, hparlen); offset += hparlen;
+        ArrayCopy(postData, header2Array, offset, 0, h2len); offset += h2len;
+        ArrayCopy(postData, filedata, offset, 0, flen); offset += flen;
         ArrayCopy(postData, footerArray, offset, 0, fend);
 
         Print("Post data size: " + IntegerToString(ArraySize(postData)));
@@ -428,10 +441,10 @@ void SendTelegramPhoto(long ticket)
         }
 
         // Delete file after sending
-        //if (FileDelete(filepath))
-        //    Print("Screenshot file deleted: " + filepath);
-        //else
-        //    Print("Failed to delete screenshot file: " + filepath + ", error: " + IntegerToString(GetLastError()));
+        if (FileDelete(filepath))
+            Print("Screenshot file deleted: " + filepath);
+        else
+            Print("Failed to delete screenshot file: " + filepath + ", error: " + IntegerToString(GetLastError()));
     }
 }
 //+------------------------------------------------------------------+
