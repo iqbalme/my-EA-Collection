@@ -10,6 +10,16 @@
 #include <Trade\PositionInfo.mqh>
 #include <Trade\Trade.mqh>
 
+// Helper: convert single byte to 2-digit hex string
+string ByteToHex(uchar v)
+{
+    string hexChars = "0123456789ABCDEF";
+    int hi = (int)(v / 16);
+    int lo = (int)(v % 16);
+    string s = StringSubstr(hexChars, hi, 1) + StringSubstr(hexChars, lo, 1);
+    return s;
+}
+
 // Struct for position
 struct PositionData
 {
@@ -37,6 +47,8 @@ struct OrderData
 // Input parameters
 input string botToken = "";          // Telegram Bot Token
 input string chatIds = "";           // Telegram Chat IDs, separated by comma
+input bool sendChartScreenshot = true; // Send chart screenshot when opening position
+input bool debugSendTest = false;    // If true, send a small test document on init for debugging
 
 // Global variables
 PositionData prevPositions[];
@@ -69,6 +81,11 @@ int OnInit()
     // Initialize prev data
     UpdatePrevPositions();
     UpdatePrevOrders();
+    // Optional debug: send small test document to verify multipart upload
+    if (debugSendTest)
+    {
+        SendTestDocument();
+    }
 
     Print("Telegram Notify EA initialized.");
     return INIT_SUCCEEDED;
@@ -115,8 +132,8 @@ void CheckPositionChanges()
                 if (posInfo.StopLoss() != prevPositions[i].sl || posInfo.TakeProfit() != prevPositions[i].tp)
                 {
                     string symbol = prevPositions[i].symbol;
-                int digits = SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-                string message = "Position Modified:\nTicket: <b>" + IntegerToString(prevPositions[i].ticket) + "</b>\nSymbol: <b>" + symbol + "</b>\nSL: <b>" + DoubleToString(posInfo.StopLoss(), digits) + "</b>\nTP: <b>" + DoubleToString(posInfo.TakeProfit(), digits) + "</b>";
+                    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+                    string message = "Position Modified:\nTicket: <b>" + IntegerToString(prevPositions[i].ticket) + "</b>\nSymbol: <b>" + symbol + "</b>\nSL: <b>" + DoubleToString(posInfo.StopLoss(), digits) + "</b>\nTP: <b>" + DoubleToString(posInfo.TakeProfit(), digits) + "</b>";
                     SendTelegramMessage(message);
                 }
                 break;
@@ -162,10 +179,11 @@ void CheckPositionChanges()
             if (!found)
             {
                 string symbol = posInfo.Symbol();
-                int digits = SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+                int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
                 string type = (posInfo.PositionType() == POSITION_TYPE_BUY) ? "🟢⬆️ BUY" : "🔴⬇️ SELL";
                 string message = "Position Opened:\n" + type + "\nTicket: <b>" + IntegerToString(posInfo.Ticket()) + "</b>\nSymbol: <b>" + symbol + "</b>\nVolume: <b>" + DoubleToString(posInfo.Volume(), 2) + "</b>\nPrice: <b>" + DoubleToString(posInfo.PriceOpen(), digits) + "</b>\nSL: <b>" + DoubleToString(posInfo.StopLoss(), digits) + "</b>\nTP: <b>" + DoubleToString(posInfo.TakeProfit(), digits) + "</b>";
                 SendTelegramMessage(message);
+                SendTelegramPhoto(posInfo.Ticket());
             }
         }
     }
@@ -192,8 +210,8 @@ void CheckOrderChanges()
                 if (sl != prevOrders[i].sl || tp != prevOrders[i].tp)
                 {
                     string symbol = prevOrders[i].symbol;
-                int digits = SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-                string message = "Order Modified:\nTicket: <b>" + IntegerToString(prevOrders[i].ticket) + "</b>\nSymbol: <b>" + symbol + "</b>\nSL: <b>" + DoubleToString(sl, digits) + "</b>\nTP: <b>" + DoubleToString(tp, digits) + "</b>";
+                    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+                    string message = "Order Modified:\nTicket: <b>" + IntegerToString(prevOrders[i].ticket) + "</b>\nSymbol: <b>" + symbol + "</b>\nSL: <b>" + DoubleToString(sl, digits) + "</b>\nTP: <b>" + DoubleToString(tp, digits) + "</b>";
                     SendTelegramMessage(message);
                 }
                 break;
@@ -223,7 +241,7 @@ void CheckOrderChanges()
         if (!found)
         {
             string symbol = OrderGetString(ORDER_SYMBOL);
-            int digits = SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+            int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
             string type = "";
             ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
             if (orderType == ORDER_TYPE_BUY_LIMIT) type = "🟢⬆️ BUY LIMIT";
@@ -293,7 +311,7 @@ void SendTelegramMessage(string text)
         string headers = "Content-Type: application/json";
         string postData = "{\"chat_id\":" + IntegerToString(chatIdsArray[i]) + ",\"text\":\"" + text + "\",\"parse_mode\":\"HTML\"}";
         char postArray[];
-        StringToCharArray(postData, postArray, 0, WHOLE_ARRAY, CP_UTF8);
+        StringToCharArray(postData, postArray, 0, WHOLE_ARRAY, 65001);
         char result[];
         string resultHeaders;
         int timeout = 5000;
@@ -310,4 +328,192 @@ void SendTelegramMessage(string text)
         }
     }
 }
+
 //+------------------------------------------------------------------+
+//| Send photo to Telegram                                           |
+//+------------------------------------------------------------------+
+void SendTelegramPhoto(long ticket)
+{
+    if (!sendChartScreenshot) return;
+
+    string filename = "screenshot_" + IntegerToString(ticket) + ".png";
+    string filepath = filename; // Files are saved in MQL5/Files
+
+    // Take screenshot
+    if (!ChartScreenShot(0, filepath, 800, 600, ALIGN_RIGHT))
+    {
+        Print("Failed to take screenshot for ticket " + IntegerToString(ticket));
+        return;
+    }
+
+    for (int i = 0; i < ArraySize(chatIdsArray); i++)
+    {
+        // Always send as document (more reliable for arbitrary binary)
+        string url = "https://api.telegram.org/bot" + botToken + "/sendDocument";
+        string boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+        string headers = "Content-Type: multipart/form-data; boundary=" + boundary;
+
+        // Read file (binary) into uchar then convert to char for WebRequest
+        int filehandle = FileOpen(filepath, FILE_READ | FILE_BIN);
+        if (filehandle == INVALID_HANDLE)
+        {
+            Print("Failed to open screenshot file: " + filepath + ", error: " + IntegerToString(GetLastError()));
+            continue;
+        }
+        int filesize = (int)FileSize(filehandle);
+        Print("Screenshot file size: " + IntegerToString(filesize));
+        uchar fileU[];
+        ArrayResize(fileU, filesize);
+        FileReadArray(filehandle, fileU, 0, filesize);
+        FileClose(filehandle);
+
+        char filedata[];
+        ArrayResize(filedata, filesize);
+        for (int b = 0; b < filesize; b++)
+            filedata[b] = (char)fileU[b];
+
+        // Build multipart body as char array with 'document' field
+        string header1 = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + IntegerToString(chatIdsArray[i]) + "\r\n";
+        string header2 = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\nContent-Type: image/png\r\n\r\n";
+        string footer = "\r\n--" + boundary + "--\r\n";
+
+        char header1Array[];
+        char header2Array[];
+        char footerArray[];
+        StringToCharArray(header1, header1Array, 0, WHOLE_ARRAY, CP_UTF8);
+        StringToCharArray(header2, header2Array, 0, WHOLE_ARRAY, CP_UTF8);
+        StringToCharArray(footer, footerArray, 0, WHOLE_ARRAY, CP_UTF8);
+
+        int h1len = ArraySize(header1Array);
+        if (h1len>0 && header1Array[h1len-1]==0) h1len--;
+        int h2len = ArraySize(header2Array);
+        if (h2len>0 && header2Array[h2len-1]==0) h2len--;
+        int flen = ArraySize(filedata);
+        int fend = ArraySize(footerArray);
+        if (fend>0 && footerArray[fend-1]==0) fend--;
+
+        int totalSize = h1len + h2len + flen + fend;
+        char postData[];
+        ArrayResize(postData, totalSize);
+
+        int offset = 0;
+        ArrayCopy(postData, header1Array, offset, 0, h1len);
+        offset += h1len;
+        ArrayCopy(postData, header2Array, offset, 0, h2len);
+        offset += h2len;
+        ArrayCopy(postData, filedata, offset, 0, flen);
+        offset += flen;
+        ArrayCopy(postData, footerArray, offset, 0, fend);
+
+        Print("Post data size: " + IntegerToString(ArraySize(postData)));
+
+        char result[];
+        string resultHeaders;
+        int timeout = 20000;
+
+        int res = WebRequest("POST", url, headers, timeout, postData, result, resultHeaders);
+        Print("sendDocument WebRequest res: " + IntegerToString(res));
+        Print("Result array size: " + IntegerToString(ArraySize(result)));
+        Print("Result headers: " + resultHeaders);
+        string response = CharArrayToString(result);
+        Print("sendDocument API response: " + response);
+
+        if (res == -1 || StringFind(response, "\"ok\":true") == -1)
+        {
+            Print("Telegram document send failed to chat " + IntegerToString(chatIdsArray[i]) + ". Response: " + response + ", Error: " + IntegerToString(GetLastError()));
+        }
+        else
+        {
+            Print("Telegram document sent successfully to chat " + IntegerToString(chatIdsArray[i]));
+        }
+
+        // Delete file after sending
+        //if (FileDelete(filepath))
+        //    Print("Screenshot file deleted: " + filepath);
+        //else
+        //    Print("Failed to delete screenshot file: " + filepath + ", error: " + IntegerToString(GetLastError()));
+    }
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Send a small test document and dump multipart headers (debug)    |
+//+------------------------------------------------------------------+
+void SendTestDocument()
+{
+    string filename = "test_doc.txt";
+    string filepath = filename;
+
+    // create test file
+    int fh = FileOpen(filepath, FILE_WRITE | FILE_TXT | FILE_ANSI);
+    if (fh == INVALID_HANDLE)
+    {
+        Print("Failed to create test file: " + filepath + ", error: " + IntegerToString(GetLastError()));
+        return;
+    }
+    FileWriteString(fh, "Hello Telegram test\n");
+    FileClose(fh);
+
+    // Build a minimal multipart body and send as document
+    string boundary = "----WebKitFormBoundaryTest12345";
+    string url = "https://api.telegram.org/bot" + botToken + "/sendDocument";
+    string headers = "Content-Type: multipart/form-data; boundary=" + boundary;
+
+    // Read file into uchar
+    int filehandle = FileOpen(filepath, FILE_READ | FILE_BIN);
+    if (filehandle == INVALID_HANDLE)
+    {
+        Print("Failed to open test file for reading: " + filepath + ", error: " + IntegerToString(GetLastError()));
+        return;
+    }
+    int filesize = (int)FileSize(filehandle);
+    uchar fileU[];
+    ArrayResize(fileU, filesize);
+    FileReadArray(filehandle, fileU, 0, filesize);
+    FileClose(filehandle);
+
+    // build headers
+    string h1 = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + IntegerToString(chatIdsArray[0]) + "\r\n";
+    string h2 = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\nContent-Type: text/plain\r\n\r\n";
+    string footer = "\r\n--" + boundary + "--\r\n";
+
+    char h1Arr[]; StringToCharArray(h1, h1Arr, 0, WHOLE_ARRAY, CP_UTF8);
+    char h2Arr[]; StringToCharArray(h2, h2Arr, 0, WHOLE_ARRAY, CP_UTF8);
+    char footArr[]; StringToCharArray(footer, footArr, 0, WHOLE_ARRAY, CP_UTF8);
+
+    int h1len = ArraySize(h1Arr); if (h1len>0 && h1Arr[h1len-1]==0) h1len--;
+    int h2len = ArraySize(h2Arr); if (h2len>0 && h2Arr[h2len-1]==0) h2len--;
+    int fend = ArraySize(footArr); if (fend>0 && footArr[fend-1]==0) fend--;
+
+    int total = h1len + h2len + filesize + fend;
+    char post[]; ArrayResize(post, total);
+
+    int off = 0;
+    ArrayCopy(post, h1Arr, off, 0, h1len); off += h1len;
+    ArrayCopy(post, h2Arr, off, 0, h2len); off += h2len;
+    // copy binary
+    for (int i = 0; i < filesize; i++) post[off + i] = (char)fileU[i];
+    off += filesize;
+    ArrayCopy(post, footArr, off, 0, fend);
+
+    // log small hex dump of the beginning of post
+    int dumpLen = MathMin(128, ArraySize(post));
+    string hex="";
+    for (int k = 0; k < dumpLen; k++)
+    {
+        uchar v = (uchar)post[k];
+        string hh = ByteToHex(v);
+        hex += hh + " ";
+    }
+    Print("[DEBUG] multipart start (hex, first " + IntegerToString(dumpLen) + " bytes): " + hex);
+
+    char result[]; string resultHeaders; int timeout = 10000;
+    int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
+    string resp = CharArrayToString(result);
+    Print("[DEBUG] sendTestDocument WebRequest res: " + IntegerToString(res));
+    Print("[DEBUG] sendTestDocument API response: " + resp);
+
+    // cleanup
+    FileDelete(filepath);
+}
+
